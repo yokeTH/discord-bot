@@ -37,8 +37,8 @@ func New(opts ...Option) *zap.Logger {
 	devCfg := zap.NewDevelopmentEncoderConfig()
 	devCfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
 
-	consoleEncoder := zapcore.NewConsoleEncoder(prodCfg)
-	fileEncoder := zapcore.NewJSONEncoder(devCfg)
+	consoleEncoder := zapcore.NewConsoleEncoder(devCfg)
+	fileEncoder := zapcore.NewJSONEncoder(prodCfg)
 
 	core := zapcore.NewTee(
 		zapcore.NewCore(consoleEncoder, stdout, level),
