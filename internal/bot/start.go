@@ -3,6 +3,8 @@ package bot
 import (
 	"context"
 	"fmt"
+
+	"github.com/yokeTH/discord-bot/internal/command"
 )
 
 func (b *bot) Start(ctx context.Context, stop context.CancelFunc) {
@@ -12,6 +14,15 @@ func (b *bot) Start(ctx context.Context, stop context.CancelFunc) {
 			stop()
 		}
 	}()
+
+	b.session.AddHandler(command.CommandRouter)
+
+	for _, cmd := range command.Commands {
+		_, err := b.session.ApplicationCommandCreate(b.config.AppID, "", cmd)
+		if err != nil {
+			fmt.Printf("cannot create command %s: %v\n", cmd.Name, err)
+		}
+	}
 
 	b.logger.Info("Bot is now running.")
 
