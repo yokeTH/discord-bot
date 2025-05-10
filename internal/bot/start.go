@@ -16,6 +16,7 @@ func (b *bot) Start(ctx context.Context, stop context.CancelFunc) {
 	}()
 
 	b.session.AddHandler(command.CommandRouter)
+	b.session.AddHandler(command.AutocompleteHandler)
 
 	for _, cmd := range command.Commands {
 		_, err := b.session.ApplicationCommandCreate(b.config.AppID, "", cmd)
