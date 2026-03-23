@@ -3,6 +3,7 @@ use std::sync::Arc;
 use stock::{PriceClient, SymbolStore};
 
 pub mod command;
+pub mod component;
 pub mod config;
 
 pub struct Data {
