@@ -1,14 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::Result;
-use bot::{
-    Data,
-    command::{self, stock::stock_command},
-    config::Config,
-};
+use bot::Error;
+use bot::component::handle_component;
+use bot::{Data, command::stock::stock_command, config::Config};
 use chrono_tz::America::New_York;
+use poise::serenity_prelude as serenity;
 use poise::{Framework, FrameworkOptions};
-use serenity::all::{ActivityData, ClientBuilder, FullEvent, GatewayIntents, Interaction};
+use serenity::all::{ActivityData, ClientBuilder, GatewayIntents};
 use stock::{PriceClient, SymbolStore};
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{debug, error, info, instrument, warn};
@@ -16,6 +15,28 @@ use tracing_futures::Instrument;
 use tracing_subscriber::{EnvFilter, fmt};
 
 mod daily;
+
+pub async fn event_handler(
+    serenity_ctx: &serenity::Context,
+    event: &serenity::FullEvent,
+    _framework_ctx: poise::FrameworkContext<'_, Data, Error>,
+    data: &Data,
+) -> Result<(), Error> {
+    if let serenity::FullEvent::InteractionCreate { interaction, .. } = event
+        && let serenity::Interaction::Component(component) = interaction
+    {
+        debug!(
+            custom_id = %component.data.custom_id,
+            user_id = %component.user.id,
+            "component interaction"
+        );
+
+        if let Err(e) = handle_component(serenity_ctx, data, component).await {
+            warn!(error = ?e, "handle_component failed");
+        }
+    }
+    Ok(())
+}
 
 #[tokio::main]
 #[instrument(name = "main", skip_all)]
@@ -45,26 +66,7 @@ async fn main() -> Result<()> {
 
     let framework = Framework::builder()
         .options(FrameworkOptions {
-            event_handler: |serenity_ctx, event, _framework_ctx, data| {
-                Box::pin(async move {
-                    if let FullEvent::InteractionCreate { interaction, .. } = event
-                        && let Interaction::Component(component) = interaction
-                    {
-                        debug!(
-                            custom_id = %component.data.custom_id,
-                            user_id = %component.user.id,
-                            "component interaction"
-                        );
-
-                        if let Err(e) =
-                            command::stock::handle_component(serenity_ctx, data, component).await
-                        {
-                            warn!(error = ?e, "handle_component failed");
-                        }
-                    }
-                    Ok(())
-                })
-            },
+            event_handler: |ctx, event, fw, data| Box::pin(event_handler(ctx, event, fw, data)),
             commands,
             ..Default::default()
         })
