@@ -1,13 +1,12 @@
-use std::time::Duration;
-
 use anyhow::Error;
-use fred::{prelude::*, socket2::TcpKeepalive};
+use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 #[derive(Clone)]
 pub struct SymbolStore {
-    client: Client,
+    conn: ConnectionManager,
     key_prefix: String,
 }
 
@@ -15,52 +14,13 @@ impl SymbolStore {
     #[instrument(name = "symbol_store_new", skip(redis_url), fields(key_prefix = %key_prefix))]
     pub async fn new(redis_url: &str, key_prefix: String) -> Result<Self, Error> {
         debug!("building redis config");
-        let config = Config::from_url(redis_url)?;
-
-        let client = Builder::from_config(config)
-            .with_connection_config(|config| {
-                config.connection_timeout = Duration::from_secs(5);
-                config.unresponsive.max_timeout = Some(Duration::from_secs(30));
-                config.unresponsive.interval = Duration::from_secs(2);
-
-                config.tcp = TcpConfig {
-                    nodelay: Some(true),
-                    keepalive: Some(
-                        TcpKeepalive::new()
-                            .with_time(Duration::from_secs(30))
-                            .with_interval(Duration::from_secs(10)),
-                    ),
-                    ..Default::default()
-                };
-            })
-            .with_performance_config(|p| {
-                p.default_command_timeout = Duration::from_secs(10);
-            })
-            .set_policy(ReconnectPolicy::Exponential {
-                attempts: 3,
-                max_attempts: 10,
-                min_delay: 1,
-                max_delay: 30,
-                base: 2,
-                jitter: 500,
-            })
-            .build()?;
-
-        client.on_error(|(err, server)| async move {
-            error!(server = ?server, error = ?err, "redis client error");
-            Ok(())
-        });
-
-        client.on_reconnect(|server| async move {
-            info!("Reconnected to {}", server);
-            Ok(())
-        });
+        let client = redis::Client::open(redis_url)?;
 
         info!("connecting to redis");
-        client.init().await?;
+        let conn = ConnectionManager::new(client).await?;
         info!("redis connected");
 
-        Ok(Self { client, key_prefix })
+        Ok(Self { conn, key_prefix })
     }
 
     /// Create a new SymbolStore from environment variables.
@@ -95,7 +55,7 @@ impl SymbolStore {
     #[instrument(name = "symbol_store_add", skip(self), fields(symbol = %symbol))]
     pub async fn add(&self, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let added: i64 = self.client.sadd(self.watchlist_key(), normalized).await?;
+        let added: i64 = self.conn.clone().sadd(self.watchlist_key(), normalized).await?;
         debug!(added, "sadd done");
         Ok(added == 1)
     }
@@ -105,7 +65,7 @@ impl SymbolStore {
     #[instrument(name = "symbol_store_remove", skip(self), fields(symbol = %symbol))]
     pub async fn remove(&self, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let removed: i64 = self.client.srem(self.watchlist_key(), normalized).await?;
+        let removed: i64 = self.conn.clone().srem(self.watchlist_key(), normalized).await?;
         debug!(removed, "srem done");
         Ok(removed == 1)
     }
@@ -113,7 +73,7 @@ impl SymbolStore {
     /// Get all symbols
     #[instrument(name = "symbol_store_list", skip(self))]
     pub async fn list(&self) -> Result<Vec<String>, Error> {
-        let members: Vec<String> = self.client.smembers(self.watchlist_key()).await?;
+        let members: Vec<String> = self.conn.clone().smembers(self.watchlist_key()).await?;
         debug!(count = members.len(), "smembers done");
         Ok(members)
     }
@@ -121,7 +81,7 @@ impl SymbolStore {
     /// Total number of tracked symbols
     #[instrument(name = "symbol_store_len", skip(self))]
     pub async fn len(&self) -> Result<usize, Error> {
-        let count: i64 = self.client.scard(self.watchlist_key()).await?;
+        let count: i64 = self.conn.clone().scard(self.watchlist_key()).await?;
         Ok(count as usize)
     }
 
@@ -141,17 +101,17 @@ impl SymbolStore {
         let symbols: Vec<String> = symbols.into_iter().map(|s| Self::normalize(&s)).collect();
 
         let del_key = self.pending_del_key(id.clone());
-        let _: i64 = self.client.del(del_key.clone()).await?;
+        let _: i64 = self.conn.clone().del(del_key.clone()).await?;
 
         let added = if symbols.is_empty() {
             warn!("no symbols provided for pending delete");
             0
         } else {
-            let added: i64 = self.client.sadd(del_key.clone(), symbols).await?;
+            let added: i64 = self.conn.clone().sadd(del_key.clone(), symbols).await?;
             added
         };
 
-        let _: i64 = self.client.expire(del_key, 300, None).await?;
+        let _: bool = self.conn.clone().expire(del_key, 300).await?;
         debug!(added, "pending delete set");
 
         Ok(added)
@@ -160,7 +120,7 @@ impl SymbolStore {
     /// Get Pending Delete
     #[instrument(name = "symbol_store_get_pending_delete", skip(self), fields(req_id = %id))]
     pub async fn get_pending_delete(&self, id: String) -> Result<Option<Vec<String>>, Error> {
-        let members: Vec<String> = self.client.smembers(self.pending_del_key(id)).await?;
+        let members: Vec<String> = self.conn.clone().smembers(self.pending_del_key(id)).await?;
         if members.is_empty() {
             Ok(None)
         } else {
