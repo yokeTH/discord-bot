@@ -55,8 +55,6 @@ jobs:
           key: bot-musl
 
       - name: Build bot
-        env:
-          V8_FROM_SOURCE: "1"
         run: cargo build -p bot --release --target x86_64-unknown-linux-musl
 
       - name: Download JetBrainsMono Nerd Font
