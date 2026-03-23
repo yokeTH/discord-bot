@@ -18,227 +18,96 @@ permissions:
   contents: read
   packages: write
 
+env:
+  FONT_VERSION: "3.2.1"
+
 jobs:
-  prepare:
+  deploy-bot:
     runs-on: ubuntu-latest
-    outputs:
-      repo_name: ${{ steps.repo.outputs.name }}
-      apps: ${{ steps.apps.outputs.apps }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: repo
-        run: echo "name=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      - id: apps
-        run: |
-          set -euo pipefail
-          APPS=$(find apps -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' \
-            | sed 's#^apps/##' | sort -u)
-
-          JSON=$(printf '%s\n' "$APPS" | jq -R . | jq -s -c .)
-          echo "apps=$JSON" >> "$GITHUB_OUTPUT"
-
-  build:
-    needs: prepare
-    runs-on: ${{ matrix.runner }}
     env:
-      REPO_NAME: ${{ needs.prepare.outputs.repo_name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        app: ${{ fromJSON(needs.prepare.outputs.apps) }}
-        arch: [amd64, arm64]
-        include:
-          - arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
+      CC: x86_64-linux-musl-gcc
+      CXX: x86_64-linux-musl-g++
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-g++
+      RUSTC_LINKER: x86_64-linux-musl-g++
 
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
 
-      - name: Cache Docker layers (local)
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-${{ matrix.app }}-${{ matrix.arch }}
-          key: ${{ runner.os }}-buildx-${{ matrix.app }}-${{ matrix.arch }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.app }}-${{ matrix.arch }}-
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake perl pkg-config libclang-dev musl-tools
 
-      - uses: docker/login-action@v3
-        if: ${{ github.event_name != 'pull_request' }}
+      - name: Install musl cross-compiler
+        run: |
+          wget https://github.com/musl-cc/musl.cc/releases/latest/download/x86_64-linux-musl-cross.tgz
+          tar xzf x86_64-linux-musl-cross.tgz -C /opt
+          echo "/opt/x86_64-linux-musl-cross/bin/" >> $GITHUB_PATH
+
+      - name: Setup Rust toolchain
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          rustup show
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
+          key: bot-musl
+
+      - name: Build bot
+        env:
+          V8_FROM_SOURCE: "1"
+        run: cargo build -p bot --release --target x86_64-unknown-linux-musl
+
+      - name: Download JetBrainsMono Nerd Font
+        run: |
+          mkdir -p fonts
+          curl -fsSL -o /tmp/JetBrainsMono.zip \
+            "https://github.com/ryanoasis/nerd-fonts/releases/download/v${FONT_VERSION}/JetBrainsMono.zip"
+          unzip -q /tmp/JetBrainsMono.zip -d fonts
+          rm -f /tmp/JetBrainsMono.zip
+
+      - name: Prepare Docker context
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/bot apps/bot/bot
+          cp /etc/ssl/certs/ca-certificates.crt apps/bot/ca-certificates.crt
+          cp -r fonts apps/bot/fonts
 
       - name: Short SHA
         id: vars
         run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./apps/${{ matrix.app }}/Dockerfile
-          platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' }}
-
-          cache-from: type=local,src=/tmp/.buildx-cache-${{ matrix.app }}-${{ matrix.arch }}
-          cache-to: type=local,mode=max,dest=/tmp/.buildx-cache-new-${{ matrix.app }}-${{ matrix.arch }}
-
-          build-args: |
-            APP_NAME=${{ matrix.app }}
-            APP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
-            CACHE_ID=${{ matrix.app }}-${{ matrix.arch }}
-
-          outputs: type=image,name=ghcr.io/${{ env.REPO_NAME }}/${{ matrix.app }},push-by-digest=true,name-canonical=true
-
-      - name: Move local cache into place
-        run: |
-          rm -rf /tmp/.buildx-cache-${{ matrix.app }}-${{ matrix.arch }}
-          mv /tmp/.buildx-cache-new-${{ matrix.app }}-${{ matrix.arch }} /tmp/.buildx-cache-${{ matrix.app }}-${{ matrix.arch }}
-
-      # filename now: <app>-<arch>-<digest>
-      - name: Export digest
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${{ matrix.app }}-${{ matrix.arch }}-${digest#sha256:}"
-
-      - name: Upload digest
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-${{ matrix.app }}-${{ matrix.arch }}
-          path: /tmp/digests/*
-          retention-days: 1
-
-  merge:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    needs: [prepare, build]
-    env:
-      REPO_NAME: ${{ needs.prepare.outputs.repo_name }}
-      APPS: ${{ needs.prepare.outputs.apps }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: /tmp/digests
-          pattern: digests-*
-          merge-multiple: true
+      - name: Repo name
+        id: repo
+        run: echo "name=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
+        if: ${{ github.event_name != 'pull_request' }}
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ github.token }}
 
-      - name: Create manifest lists and capture manifest digests
-        run: |
-          set -eux
-          shopt -s nullglob
-
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            TAG="$GITHUB_REF_NAME"
-          elif [ "$GITHUB_REF_NAME" = "main" ]; then
-            TAG="main"
-          else
-            TAG="$GITHUB_REF_NAME"
-          fi
-
-          apps=$(echo '${{ env.APPS }}' | jq -r '.[]')
-
-          mkdir -p /tmp/manifests
-          : > /tmp/manifests/manifest-digests.txt
-
-          for app in $apps; do
-            files=(/tmp/digests/${app}-*)
-            if [ ${#files[@]} -eq 0 ]; then
-              echo "No digests found for $app" >&2
-              exit 1
-            fi
-
-            SOURCES=""
-            for f in "${files[@]}"; do
-              DIGEST="${f##*-}"
-              SOURCES="$SOURCES ghcr.io/${REPO_NAME}/${app}@sha256:${DIGEST}"
-            done
-
-            docker buildx imagetools create \
-              -t ghcr.io/${REPO_NAME}/${app}:$TAG \
-              $SOURCES
-
-            MDIGEST=$(
-              docker buildx imagetools inspect \
-                --format '{{json .Manifest}}' \
-                ghcr.io/${REPO_NAME}/${app}:$TAG \
-              | jq -r '.digest'
-            )
-
-            if [ -z "$MDIGEST" ] || [ "$MDIGEST" = "null" ]; then
-              echo "Failed to read manifest digest for $app" >&2
-              exit 1
-            fi
-
-            echo "$app $MDIGEST" >> /tmp/manifests/manifest-digests.txt
-          done
-
-      - uses: actions/upload-artifact@v4
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
         with:
-          name: manifest-digests
-          path: /tmp/manifests/manifest-digests.txt
+          context: ./apps/bot
+          file: ./apps/bot/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
+          build-args: |
+            APP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
 
-  deploy:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
-    needs: [prepare, merge]
-    strategy:
-      matrix:
-        app: ${{ fromJSON(needs.prepare.outputs.apps) }}
-    env:
-      REPO_NAME: ${{ needs.prepare.outputs.repo_name }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: manifest-digests
-          path: /tmp/manifests
-
-      - name: Resolve image for app
-        id: md
-        run: |
-          set -euo pipefail
-          APP="${{ matrix.app }}"
-
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            # Use the tag directly
-            IMAGE="ghcr.io/${{ env.REPO_NAME }}/${APP}:${GITHUB_REF_NAME}"
-          else
-            # Use the manifest digest (immutable)
-            DIGEST=$(awk -v app="$APP" '$1==app {print $2}' /tmp/manifests/manifest-digests.txt)
-            if [ -z "${DIGEST:-}" ]; then
-              echo "No digest found for $APP" >&2
-              exit 1
-            fi
-            IMAGE="ghcr.io/${{ env.REPO_NAME }}/${APP}@${DIGEST}"
-          fi
-
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-
-      - uses: deploys-app/deploys-action@v1
+      - name: Deploy
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: deploys-app/deploys-action@v1
         with:
           project: ${{ secrets.DEPLOYS_PROJECT }}
           location: gke.cluster-rcf2
-          name: ${{ secrets[format('DEPLOYS_DEPLOY_NAME_{0}', matrix.app)] }}
-          image: ${{ steps.md.outputs.image }}
+          name: ${{ secrets.DEPLOYS_DEPLOY_NAME_bot }}
+          image: ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
         env:
           DEPLOYS_AUTH_USER: ${{ secrets.DEPLOYS_AUTH_USER }}
           DEPLOYS_AUTH_PASS: ${{ secrets.DEPLOYS_AUTH_PASS }}
