@@ -1,6 +1,6 @@
 use anyhow::Error;
 use redis::AsyncCommands;
-use redis::aio::ConnectionManager;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 
 use tracing::{debug, info, instrument, warn};
 
@@ -17,7 +17,11 @@ impl SymbolStore {
         let client = redis::Client::open(redis_url)?;
 
         info!("connecting to redis");
-        let conn = ConnectionManager::new(client).await?;
+        let config = ConnectionManagerConfig::new()
+            .set_connection_timeout(Some(std::time::Duration::from_secs(5)))
+            .set_response_timeout(Some(std::time::Duration::from_secs(10)))
+            .set_number_of_retries(3);
+        let conn = ConnectionManager::new_with_config(client, config).await?;
         info!("redis connected");
 
         Ok(Self { conn, key_prefix })
