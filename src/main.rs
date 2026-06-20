@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{io::IsTerminal, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use bot::Error;
@@ -45,10 +45,15 @@ async fn main() -> Result<()> {
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
+    // Only emit ANSI colors when stdout is a real terminal (and NO_COLOR is
+    // unset); otherwise log sinks show raw escape codes.
+    let ansi = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+
     fmt()
         .with_env_filter(filter)
         .with_target(true)
         .with_line_number(true)
+        .with_ansi(ansi)
         .compact()
         .init();
 
