@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT symbol AS \"symbol!\" FROM pending_delete WHERE req_id = $1 AND expires_at > now() ORDER BY symbol",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "symbol!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "84ebd6d3156c5d36f2d57d618ecfce9f92705ab068495b1b6f28ac21dec7d2f6"
+}

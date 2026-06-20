@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM pending_delete WHERE req_id = $1 OR expires_at < now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d921322cce8fae7533c407fb9618a52d5314b13270c533833a4f7778514f0bfa"
+}

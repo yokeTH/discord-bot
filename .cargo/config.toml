@@ -1,3 +1,9 @@
+[env]
+# Build against the committed .sqlx offline cache so no database is needed
+# at compile time. Regenerate with `cargo sqlx prepare` (see Makefile).
+# force = false: an explicit SQLX_OFFLINE in the shell still wins.
+SQLX_OFFLINE = "true"
+
 [net]
 git-fetch-with-cli = true
 
