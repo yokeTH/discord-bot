@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO watchlist (channel_id, symbol, created_by) VALUES ($1, $2, $3) ON CONFLICT (channel_id, symbol) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48138430d2140248dc8385ed6ee3619920b5119a178e54c214df6bbb576eabe3"
+}
