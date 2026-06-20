@@ -102,9 +102,14 @@ impl SymbolStore {
     #[instrument(
         name = "symbol_store_set_pending_delete",
         skip(self, symbols),
-        fields(req_id = %id, symbol_count = symbols.len())
+        fields(req_id = %id, created_by, symbol_count = symbols.len())
     )]
-    pub async fn set_pending_delete(&self, id: String, symbols: Vec<String>) -> Result<i64, Error> {
+    pub async fn set_pending_delete(
+        &self,
+        id: String,
+        created_by: i64,
+        symbols: Vec<String>,
+    ) -> Result<i64, Error> {
         let symbols: Vec<String> = symbols.into_iter().map(|s| Self::normalize(&s)).collect();
 
         let mut tx = self.pool.begin().await?;
@@ -125,11 +130,12 @@ impl SymbolStore {
         let mut added = 0i64;
         for symbol in &symbols {
             let res = sqlx::query!(
-                "INSERT INTO pending_delete (req_id, symbol, expires_at) \
-                 VALUES ($1, $2, now() + INTERVAL '5 minutes') \
+                "INSERT INTO pending_delete (req_id, symbol, created_by, expires_at) \
+                 VALUES ($1, $2, $3, now() + INTERVAL '5 minutes') \
                  ON CONFLICT (req_id, symbol) DO NOTHING",
                 id,
                 symbol,
+                created_by,
             )
             .execute(&mut *tx)
             .await?;
@@ -140,6 +146,32 @@ impl SymbolStore {
         debug!(added, "pending delete set");
 
         Ok(added)
+    }
+
+    /// Mark a pending delete request as confirmed.
+    #[instrument(name = "symbol_store_confirm_pending_delete", skip(self), fields(req_id = %id))]
+    pub async fn confirm_pending_delete(&self, id: String) -> Result<(), Error> {
+        sqlx::query!(
+            "UPDATE pending_delete SET status = 'confirmed' WHERE req_id = $1",
+            id,
+        )
+        .execute(&self.pool)
+        .await?;
+        debug!("pending delete confirmed");
+        Ok(())
+    }
+
+    /// Mark a pending delete request as cancelled.
+    #[instrument(name = "symbol_store_cancel_pending_delete", skip(self), fields(req_id = %id))]
+    pub async fn cancel_pending_delete(&self, id: String) -> Result<(), Error> {
+        sqlx::query!(
+            "UPDATE pending_delete SET status = 'cancelled' WHERE req_id = $1",
+            id,
+        )
+        .execute(&self.pool)
+        .await?;
+        debug!("pending delete cancelled");
+        Ok(())
     }
 
     /// Get Pending Delete

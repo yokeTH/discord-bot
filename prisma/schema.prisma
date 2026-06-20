@@ -13,10 +13,18 @@ model Watchlist {
 }
 
 model PendingDelete {
-  reqId     String   @map("req_id")
+  reqId     String        @map("req_id")
   symbol    String
-  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createdBy BigInt        @map("created_by")
+  status    PendingStatus @default(pending)
+  expiresAt DateTime      @map("expires_at") @db.Timestamptz(6)
 
   @@id([reqId, symbol])
   @@map("pending_delete")
+}
+
+enum PendingStatus {
+  pending
+  confirmed
+  cancelled
 }
