@@ -38,6 +38,24 @@ pub async fn event_handler(
     Ok(())
 }
 
+async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+    match &error {
+        poise::FrameworkError::Command { error: e, ctx, .. } => {
+            error!(
+                command = %ctx.command().qualified_name,
+                user_id = %ctx.author().id,
+                error = ?e,
+                "command returned an error"
+            );
+        }
+        e => error!(error = %e, "framework error"),
+    }
+
+    if let Err(e) = poise::builtins::on_error(error).await {
+        error!(error = ?e, "failed to run default poise error handler");
+    }
+}
+
 #[tokio::main]
 #[instrument(name = "main", skip_all)]
 async fn main() -> Result<()> {
@@ -73,6 +91,7 @@ async fn main() -> Result<()> {
         .options(FrameworkOptions {
             event_handler: |ctx, event, fw, data| Box::pin(event_handler(ctx, event, fw, data)),
             commands,
+            on_error: |error| Box::pin(on_error(error)),
             ..Default::default()
         })
         .setup({
