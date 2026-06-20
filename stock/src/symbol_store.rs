@@ -39,14 +39,15 @@ impl SymbolStore {
 
     /// Add a stock symbol to a channel's watchlist.
     /// Returns true if it was newly added.
-    #[instrument(name = "symbol_store_add", skip(self), fields(channel_id, symbol = %symbol))]
-    pub async fn add(&self, channel_id: i64, symbol: &str) -> Result<bool, Error> {
+    #[instrument(name = "symbol_store_add", skip(self), fields(channel_id, created_by, symbol = %symbol))]
+    pub async fn add(&self, channel_id: i64, created_by: i64, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
         let res = sqlx::query!(
-            "INSERT INTO watchlist (channel_id, symbol) VALUES ($1, $2) \
+            "INSERT INTO watchlist (channel_id, symbol, created_by) VALUES ($1, $2, $3) \
              ON CONFLICT (channel_id, symbol) DO NOTHING",
             channel_id,
             normalized,
+            created_by,
         )
         .execute(&self.pool)
         .await?;

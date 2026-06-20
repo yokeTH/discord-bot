@@ -13,6 +13,7 @@ pub async fn watch(
 
     let store = &ctx.data().symbol_store;
     let channel_id = ctx.channel_id().get() as i64;
+    let created_by = ctx.author().id.get() as i64;
 
     let symbols: Vec<String> = symbol
         .split(',')
@@ -32,7 +33,7 @@ pub async fn watch(
     let mut already = Vec::new();
 
     for sym in symbols {
-        match store.add(channel_id, &sym).await? {
+        match store.add(channel_id, created_by, &sym).await? {
             true => {
                 info!(symbol = %sym, "added symbol to watchlist");
                 added.push(sym);

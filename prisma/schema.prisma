@@ -5,6 +5,7 @@ datasource db {
 model Watchlist {
   channelId BigInt   @map("channel_id")
   symbol    String
+  createdBy BigInt   @map("created_by")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@id([channelId, symbol])
