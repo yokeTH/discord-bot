@@ -25,6 +25,7 @@ jobs:
   deploy-bot:
     runs-on: ubuntu-latest
     env:
+      SQLX_OFFLINE: "true"
       CC: x86_64-linux-musl-gcc
       CXX: x86_64-linux-musl-g++
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: x86_64-linux-musl-g++
