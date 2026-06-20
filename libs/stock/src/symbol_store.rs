@@ -1,98 +1,102 @@
 use anyhow::Error;
-use redis::AsyncCommands;
-use redis::aio::{ConnectionManager, ConnectionManagerConfig};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use tracing::{debug, info, instrument, warn};
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
 #[derive(Clone)]
 pub struct SymbolStore {
-    conn: ConnectionManager,
-    key_prefix: String,
+    pool: PgPool,
 }
 
 impl SymbolStore {
-    #[instrument(name = "symbol_store_new", skip(redis_url), fields(key_prefix = %key_prefix))]
-    pub async fn new(redis_url: &str, key_prefix: String) -> Result<Self, Error> {
-        debug!("building redis config");
-        let client = redis::Client::open(redis_url)?;
+    #[instrument(name = "symbol_store_new", skip_all)]
+    pub async fn new(database_url: &str) -> Result<Self, Error> {
+        info!("connecting to database");
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(5))
+            .connect(database_url)
+            .await?;
+        info!("database connected");
 
-        info!("connecting to redis");
-        let config = ConnectionManagerConfig::new()
-            .set_connection_timeout(Some(std::time::Duration::from_secs(5)))
-            .set_response_timeout(Some(std::time::Duration::from_secs(10)))
-            .set_number_of_retries(3);
-        let conn = ConnectionManager::new_with_config(client, config).await?;
-        info!("redis connected");
+        info!("running migrations");
+        MIGRATOR.run(&pool).await?;
+        info!("migrations applied");
 
-        Ok(Self { conn, key_prefix })
+        Ok(Self { pool })
     }
 
     /// Create a new SymbolStore from environment variables.
-    /// Expects REDIS_URL and REDIS_KEY_PREFIX to be set.
+    /// Expects DATABASE_URL to be set.
     #[instrument(name = "symbol_store_from_env", skip_all)]
     pub async fn from_env() -> Result<Self, Error> {
-        use std::env;
+        let database_url = std::env::var("DATABASE_URL")
+            .map_err(|_| Error::msg("DATABASE_URL environment variable not set"))?;
 
-        let redis_url = env::var("REDIS_URL")
-            .map_err(|_| Error::msg("REDIS_URL environment variable not set"))?;
-        let key_prefix = env::var("REDIS_KEY_PREFIX")
-            .map_err(|_| Error::msg("REDIS_KEY_PREFIX environment variable not set"))?;
-
-        info!(key_prefix = %key_prefix, "creating SymbolStore from env");
-        Self::new(&redis_url, key_prefix).await
+        info!("creating SymbolStore from env");
+        Self::new(&database_url).await
     }
 
     fn normalize(symbol: &str) -> String {
         symbol.trim().to_uppercase()
     }
 
-    fn watchlist_key(&self) -> String {
-        format!("{}:watchlist", self.key_prefix)
-    }
-
-    fn pending_del_key(&self, request_id: String) -> String {
-        format!("{}:pending_del:{}", self.key_prefix, request_id)
-    }
-
-    /// Add a stock symbol
-    /// Returns true if it was newly added
-    #[instrument(name = "symbol_store_add", skip(self), fields(symbol = %symbol))]
-    pub async fn add(&self, symbol: &str) -> Result<bool, Error> {
+    /// Add a stock symbol to a channel's watchlist.
+    /// Returns true if it was newly added.
+    #[instrument(name = "symbol_store_add", skip(self), fields(channel_id, symbol = %symbol))]
+    pub async fn add(&self, channel_id: i64, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let added: i64 = self.conn.clone().sadd(self.watchlist_key(), normalized).await?;
-        debug!(added, "sadd done");
-        Ok(added == 1)
+        let res = sqlx::query(
+            "INSERT INTO watchlist (channel_id, symbol) VALUES ($1, $2) \
+             ON CONFLICT (channel_id, symbol) DO NOTHING",
+        )
+        .bind(channel_id)
+        .bind(&normalized)
+        .execute(&self.pool)
+        .await?;
+        let added = res.rows_affected() == 1;
+        debug!(added, "insert done");
+        Ok(added)
     }
 
-    /// Remove a stock symbol
-    /// Returns true if it existed
-    #[instrument(name = "symbol_store_remove", skip(self), fields(symbol = %symbol))]
-    pub async fn remove(&self, symbol: &str) -> Result<bool, Error> {
+    /// Remove a stock symbol from a channel's watchlist.
+    /// Returns true if it existed.
+    #[instrument(name = "symbol_store_remove", skip(self), fields(channel_id, symbol = %symbol))]
+    pub async fn remove(&self, channel_id: i64, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let removed: i64 = self.conn.clone().srem(self.watchlist_key(), normalized).await?;
-        debug!(removed, "srem done");
-        Ok(removed == 1)
+        let res = sqlx::query("DELETE FROM watchlist WHERE channel_id = $1 AND symbol = $2")
+            .bind(channel_id)
+            .bind(&normalized)
+            .execute(&self.pool)
+            .await?;
+        let removed = res.rows_affected() == 1;
+        debug!(removed, "delete done");
+        Ok(removed)
     }
 
-    /// Get all symbols
-    #[instrument(name = "symbol_store_list", skip(self))]
-    pub async fn list(&self) -> Result<Vec<String>, Error> {
-        let members: Vec<String> = self.conn.clone().smembers(self.watchlist_key()).await?;
-        debug!(count = members.len(), "smembers done");
-        Ok(members)
+    /// Get all symbols watched in a channel.
+    #[instrument(name = "symbol_store_list", skip(self), fields(channel_id))]
+    pub async fn list(&self, channel_id: i64) -> Result<Vec<String>, Error> {
+        let symbols: Vec<String> =
+            sqlx::query_scalar("SELECT symbol FROM watchlist WHERE channel_id = $1 ORDER BY symbol")
+                .bind(channel_id)
+                .fetch_all(&self.pool)
+                .await?;
+        debug!(count = symbols.len(), "list done");
+        Ok(symbols)
     }
 
-    /// Total number of tracked symbols
-    #[instrument(name = "symbol_store_len", skip(self))]
-    pub async fn len(&self) -> Result<usize, Error> {
-        let count: i64 = self.conn.clone().scard(self.watchlist_key()).await?;
-        Ok(count as usize)
-    }
-
-    /// Returns true if there are no tracked symbols
-    #[instrument(name = "symbol_store_is_empty", skip(self))]
-    pub async fn is_empty(&self) -> Result<bool, Error> {
-        Ok(self.len().await? == 0)
+    /// Distinct channels that have at least one watched symbol.
+    #[instrument(name = "symbol_store_channels", skip(self))]
+    pub async fn channels(&self) -> Result<Vec<i64>, Error> {
+        let channels: Vec<i64> =
+            sqlx::query_scalar("SELECT DISTINCT channel_id FROM watchlist")
+                .fetch_all(&self.pool)
+                .await?;
+        debug!(count = channels.len(), "channels done");
+        Ok(channels)
     }
 
     /// Set Pending Delete
@@ -104,18 +108,34 @@ impl SymbolStore {
     pub async fn set_pending_delete(&self, id: String, symbols: Vec<String>) -> Result<i64, Error> {
         let symbols: Vec<String> = symbols.into_iter().map(|s| Self::normalize(&s)).collect();
 
-        let del_key = self.pending_del_key(id.clone());
-        let _: i64 = self.conn.clone().del(del_key.clone()).await?;
+        let mut tx = self.pool.begin().await?;
 
-        let added = if symbols.is_empty() {
+        sqlx::query("DELETE FROM pending_delete WHERE req_id = $1 OR expires_at < now()")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+
+        if symbols.is_empty() {
             warn!("no symbols provided for pending delete");
-            0
-        } else {
-            let added: i64 = self.conn.clone().sadd(del_key.clone(), symbols).await?;
-            added
-        };
+            tx.commit().await?;
+            return Ok(0);
+        }
 
-        let _: bool = self.conn.clone().expire(del_key, 300).await?;
+        let mut added = 0i64;
+        for symbol in &symbols {
+            let res = sqlx::query(
+                "INSERT INTO pending_delete (req_id, symbol, expires_at) \
+                 VALUES ($1, $2, now() + INTERVAL '5 minutes') \
+                 ON CONFLICT (req_id, symbol) DO NOTHING",
+            )
+            .bind(&id)
+            .bind(symbol)
+            .execute(&mut *tx)
+            .await?;
+            added += res.rows_affected() as i64;
+        }
+
+        tx.commit().await?;
         debug!(added, "pending delete set");
 
         Ok(added)
@@ -124,12 +144,18 @@ impl SymbolStore {
     /// Get Pending Delete
     #[instrument(name = "symbol_store_get_pending_delete", skip(self), fields(req_id = %id))]
     pub async fn get_pending_delete(&self, id: String) -> Result<Option<Vec<String>>, Error> {
-        let members: Vec<String> = self.conn.clone().smembers(self.pending_del_key(id)).await?;
-        if members.is_empty() {
+        let symbols: Vec<String> = sqlx::query_scalar(
+            "SELECT symbol FROM pending_delete WHERE req_id = $1 AND expires_at > now() ORDER BY symbol",
+        )
+        .bind(&id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        if symbols.is_empty() {
             Ok(None)
         } else {
-            debug!(count = members.len(), "pending delete loaded");
-            Ok(Some(members))
+            debug!(count = symbols.len(), "pending delete loaded");
+            Ok(Some(symbols))
         }
     }
 }

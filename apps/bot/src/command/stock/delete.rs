@@ -14,8 +14,9 @@ pub async fn delete(ctx: Context<'_>) -> Result<(), Error> {
     debug!("deferred reply");
 
     let symbol_store = ctx.data().symbol_store.clone();
+    let channel_id = ctx.channel_id().get() as i64;
 
-    let symbols: Vec<String> = symbol_store.list().await?;
+    let symbols: Vec<String> = symbol_store.list(channel_id).await?;
     if symbols.is_empty() {
         info!("attempted delete from empty watchlist");
         bail!("Watchlist is empty.");

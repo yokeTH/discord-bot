@@ -26,10 +26,11 @@ pub async fn trigger(ctx: Context<'_>) -> Result<(), Error> {
 
     let price_client = ctx.data().price_client.clone();
     let symbol_store = ctx.data().symbol_store.clone();
+    let channel_id = ctx.channel_id().get() as i64;
 
-    let symbols = timeout(StdDuration::from_secs(2), symbol_store.list())
+    let symbols = timeout(StdDuration::from_secs(2), symbol_store.list(channel_id))
         .await
-        .map_err(|_| Error::msg("redis list() timed out"))??;
+        .map_err(|_| Error::msg("list() timed out"))??;
 
     info!(total_symbols = symbols.len(), "loaded symbols");
 

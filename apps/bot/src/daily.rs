@@ -16,18 +16,44 @@ struct Hit {
     attachment: CreateAttachment,
 }
 
-#[instrument(
-    name = "run_daily",
-    skip(http, price_client, symbol_store),
-    fields(channel_id = %channel)
-)]
+#[instrument(name = "run_daily", skip(http, price_client, symbol_store))]
 pub async fn run_daily(
     http: Arc<Http>,
-    channel: ChannelId,
     price_client: Arc<PriceClient>,
     symbol_store: Arc<SymbolStore>,
 ) -> Result<()> {
-    let symbols = symbol_store.list().await?;
+    let channels = symbol_store.channels().await?;
+    info!(channels = channels.len(), "loaded channels");
+
+    for channel_id in channels {
+        let channel = ChannelId::new(channel_id as u64);
+        let symbols = match symbol_store.list(channel_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!(channel_id, error = ?e, "failed to list symbols");
+                continue;
+            }
+        };
+
+        let span = tracing::info_span!("daily_channel", channel_id = %channel);
+        if let Err(e) = scan_channel(http.clone(), channel, price_client.clone(), symbols)
+            .instrument(span)
+            .await
+        {
+            error!(channel_id, error = ?e, "channel scan failed");
+        }
+    }
+
+    Ok(())
+}
+
+#[instrument(name = "scan_channel", skip(http, price_client, symbols), fields(channel_id = %channel))]
+async fn scan_channel(
+    http: Arc<Http>,
+    channel: ChannelId,
+    price_client: Arc<PriceClient>,
+    symbols: Vec<String>,
+) -> Result<()> {
     info!(total_symbols = symbols.len(), "loaded symbols");
 
     let mut embeds: Vec<CreateEmbed> = Vec::new();
