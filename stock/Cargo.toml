@@ -8,7 +8,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 plotters = { version = "0.3", default-features = false, features = ["svg_backend", "ab_glyph", "line_series", "full_palette"] }
 resvg = "0.45"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "migrate", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "macros"] }
 ta = "0.5"
 tokio = { workspace = true }
 reqwest = { workspace = true }
