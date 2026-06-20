@@ -6,7 +6,7 @@ use crate::{Data, Error};
 
 pub const SELECT_DELETE_ID: &str = "select_delete";
 pub const CONFIRM_PREFIX: &str = "confirm_del_";
-pub const CANCEL_ID: &str = "cancel_del";
+pub const CANCEL_PREFIX: &str = "cancel_del_";
 
 #[instrument(
     name = "component_delete",
@@ -39,7 +39,7 @@ pub async fn handle_component(
         let req_id = format!("{user_id}-{ts}");
 
         data.symbol_store
-            .set_pending_delete(req_id.clone(), values.clone())
+            .set_pending_delete(req_id.clone(), user_id as i64, values.clone())
             .await?;
 
         info!(
@@ -59,7 +59,7 @@ pub async fn handle_component(
             serenity::CreateButton::new(format!("{CONFIRM_PREFIX}{req_id}"))
                 .label("Confirm")
                 .style(serenity::ButtonStyle::Danger),
-            serenity::CreateButton::new(CANCEL_ID)
+            serenity::CreateButton::new(format!("{CANCEL_PREFIX}{req_id}"))
                 .label("Cancel")
                 .style(serenity::ButtonStyle::Secondary),
         ]);
@@ -79,8 +79,16 @@ pub async fn handle_component(
         return Ok(());
     }
 
-    if id == CANCEL_ID {
-        info!("cancelled delete operation");
+    if let Some(req_id) = id.strip_prefix(CANCEL_PREFIX) {
+        info!(req_id = %req_id, "cancelled delete operation");
+
+        if let Err(e) = data
+            .symbol_store
+            .cancel_pending_delete(req_id.to_string())
+            .await
+        {
+            error!(req_id = %req_id, error = ?e, "failed to mark pending delete cancelled");
+        }
 
         interaction
             .create_response(
@@ -152,6 +160,14 @@ pub async fn handle_component(
                 Ok(_) => info!(symbol = %sym, "deleted symbol"),
                 Err(e) => error!(symbol = %sym, error = ?e, "failed to delete symbol"),
             }
+        }
+
+        if let Err(e) = data
+            .symbol_store
+            .confirm_pending_delete(req_id.to_string())
+            .await
+        {
+            error!(req_id = %req_id, error = ?e, "failed to mark pending delete confirmed");
         }
 
         interaction

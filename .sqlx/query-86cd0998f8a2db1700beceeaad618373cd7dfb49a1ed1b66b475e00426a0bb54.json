@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pending_delete SET status = 'cancelled' WHERE req_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "86cd0998f8a2db1700beceeaad618373cd7dfb49a1ed1b66b475e00426a0bb54"
+}
