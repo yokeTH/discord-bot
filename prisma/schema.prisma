@@ -1,0 +1,21 @@
+datasource db {
+  provider = "cockroachdb"
+}
+
+model Watchlist {
+  channelId BigInt   @map("channel_id")
+  symbol    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([channelId, symbol])
+  @@map("watchlist")
+}
+
+model PendingDelete {
+  reqId     String   @map("req_id")
+  symbol    String
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@id([reqId, symbol])
+  @@map("pending_delete")
+}

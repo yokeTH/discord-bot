@@ -1,0 +1,12 @@
+{
+  "name": "discord-bot-prisma",
+  "private": true,
+  "description": "Prisma-managed CockroachDB schema and migrations for the discord-bot",
+  "scripts": {
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy"
+  },
+  "devDependencies": {
+    "prisma": "^7.8.0"
+  }
+}

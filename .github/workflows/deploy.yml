@@ -22,8 +22,10 @@ env:
   FONT_VERSION: "3.2.1"
 
 jobs:
-  deploy-bot:
+  build:
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.ref }}
     env:
       SQLX_OFFLINE: "true"
       CC: x86_64-linux-musl-gcc
@@ -79,6 +81,10 @@ jobs:
         id: repo
         run: echo "name=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      - name: Image ref
+        id: image
+        run: echo "ref=ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}" >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -94,18 +100,41 @@ jobs:
           context: .
           file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
+          tags: ${{ steps.image.outputs.ref }}
           build-args: |
             APP_VERSION=${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
 
+  migrate:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Apply migrations
+        run: bunx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, migrate]
+    if: ${{ github.event_name != 'pull_request' }}
+    steps:
       - name: Deploy
-        if: ${{ github.event_name != 'pull_request' }}
         uses: deploys-app/deploys-action@v1
         with:
           project: ${{ secrets.DEPLOYS_PROJECT }}
           location: gke.cluster-rcf2
           name: ${{ secrets.DEPLOYS_DEPLOY_NAME_bot }}
-          image: ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
+          image: ${{ needs.build.outputs.image }}
         env:
           DEPLOYS_AUTH_USER: ${{ secrets.DEPLOYS_AUTH_USER }}
           DEPLOYS_AUTH_PASS: ${{ secrets.DEPLOYS_AUTH_PASS }}

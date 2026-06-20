@@ -3,8 +3,6 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use tracing::{debug, info, instrument, warn};
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
 #[derive(Clone)]
 pub struct SymbolStore {
     pool: PgPool,
@@ -20,10 +18,6 @@ impl SymbolStore {
             .connect(database_url)
             .await?;
         info!("database connected");
-
-        info!("running migrations");
-        MIGRATOR.run(&pool).await?;
-        info!("migrations applied");
 
         Ok(Self { pool })
     }

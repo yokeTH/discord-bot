@@ -41,6 +41,7 @@
             pkgs.taplo
             pkgs.cargo-watch
             pkgs.sqlx-cli
+            pkgs.bun
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
