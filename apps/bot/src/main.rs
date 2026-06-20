@@ -130,9 +130,6 @@ async fn main() -> Result<()> {
         .expect("Err creating client");
 
     let http = client.http.clone();
-    let channel_id: u64 = std::env::var("DISCORD_TARGET_CHANNEL_ID")?.parse()?;
-    let channel = serenity::all::ChannelId::new(channel_id);
-    info!(channel_id, "daily target channel loaded");
 
     let sched = JobScheduler::new().await?;
     info!("job scheduler created");
@@ -146,16 +143,15 @@ async fn main() -> Result<()> {
             New_York,
             move |_uuid, _l| {
                 let http = http.clone();
-                let channel = channel;
                 let price_client = Arc::clone(&price_client_job);
                 let symbol_store = Arc::clone(&symbol_store_job);
 
-                let span = tracing::info_span!("daily_job", channel_id = %channel);
+                let span = tracing::info_span!("daily_job");
                 Box::pin(
                     async move {
                         info!("starting daily run");
                         if let Err(e) =
-                            daily::run_daily(http, channel, price_client, symbol_store).await
+                            daily::run_daily(http, price_client, symbol_store).await
                         {
                             error!(error = ?e, "run_daily failed");
                         } else {

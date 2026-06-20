@@ -146,8 +146,9 @@ pub async fn handle_component(
         );
 
         // delete each symbol
+        let channel_id = interaction.channel_id.get() as i64;
         for sym in &symbols {
-            match data.symbol_store.remove(sym).await {
+            match data.symbol_store.remove(channel_id, sym).await {
                 Ok(_) => info!(symbol = %sym, "deleted symbol"),
                 Err(e) => error!(symbol = %sym, error = ?e, "failed to delete symbol"),
             }
