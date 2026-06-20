@@ -95,28 +95,19 @@ async fn main() -> Result<()> {
                     poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                     info!("registered commands globally");
 
-                    // Status: toggle version / time
+                    // Status: "vX.X.X ∙ HH:MM (+07:00)"
                     let ctx_clone = ctx.clone();
                     tokio::spawn(async move {
-                        let mut show_version = true;
                         let mut tick = tokio::time::interval(Duration::from_secs(30));
 
                         loop {
                             tick.tick().await;
 
-                            let text = if show_version {
-                                if config.version.starts_with('v') {
-                                    config.version.clone()
-                                } else {
-                                    format!("Version - {}", config.version)
-                                }
-                            } else {
-                                let now = chrono::Local::now();
-                                format!("Time - {}", now.format("%H:%M (%:z)"))
-                            };
+                            let now = chrono::Utc::now().with_timezone(&chrono_tz::Asia::Bangkok);
+                            let text =
+                                format!("{} ∙ {}", config.version, now.format("%H:%M (%:z)"));
 
                             ctx_clone.set_activity(Some(ActivityData::custom(text)));
-                            show_version = !show_version;
                         }
                     });
 
