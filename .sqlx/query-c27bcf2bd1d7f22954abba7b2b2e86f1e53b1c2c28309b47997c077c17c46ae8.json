@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT symbol AS \"symbol!\" FROM watchlist WHERE channel_id = $1 ORDER BY symbol",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "symbol!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c27bcf2bd1d7f22954abba7b2b2e86f1e53b1c2c28309b47997c077c17c46ae8"
+}

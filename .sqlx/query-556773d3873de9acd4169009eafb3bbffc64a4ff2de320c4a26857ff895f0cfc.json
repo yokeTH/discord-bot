@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO pending_delete (req_id, symbol, expires_at) VALUES ($1, $2, now() + INTERVAL '5 minutes') ON CONFLICT (req_id, symbol) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "556773d3873de9acd4169009eafb3bbffc64a4ff2de320c4a26857ff895f0cfc"
+}

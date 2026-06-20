@@ -48,12 +48,12 @@ impl SymbolStore {
     #[instrument(name = "symbol_store_add", skip(self), fields(channel_id, symbol = %symbol))]
     pub async fn add(&self, channel_id: i64, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let res = sqlx::query(
+        let res = sqlx::query!(
             "INSERT INTO watchlist (channel_id, symbol) VALUES ($1, $2) \
              ON CONFLICT (channel_id, symbol) DO NOTHING",
+            channel_id,
+            normalized,
         )
-        .bind(channel_id)
-        .bind(&normalized)
         .execute(&self.pool)
         .await?;
         let added = res.rows_affected() == 1;
@@ -66,11 +66,13 @@ impl SymbolStore {
     #[instrument(name = "symbol_store_remove", skip(self), fields(channel_id, symbol = %symbol))]
     pub async fn remove(&self, channel_id: i64, symbol: &str) -> Result<bool, Error> {
         let normalized = Self::normalize(symbol);
-        let res = sqlx::query("DELETE FROM watchlist WHERE channel_id = $1 AND symbol = $2")
-            .bind(channel_id)
-            .bind(&normalized)
-            .execute(&self.pool)
-            .await?;
+        let res = sqlx::query!(
+            "DELETE FROM watchlist WHERE channel_id = $1 AND symbol = $2",
+            channel_id,
+            normalized,
+        )
+        .execute(&self.pool)
+        .await?;
         let removed = res.rows_affected() == 1;
         debug!(removed, "delete done");
         Ok(removed)
@@ -79,11 +81,12 @@ impl SymbolStore {
     /// Get all symbols watched in a channel.
     #[instrument(name = "symbol_store_list", skip(self), fields(channel_id))]
     pub async fn list(&self, channel_id: i64) -> Result<Vec<String>, Error> {
-        let symbols: Vec<String> =
-            sqlx::query_scalar("SELECT symbol FROM watchlist WHERE channel_id = $1 ORDER BY symbol")
-                .bind(channel_id)
-                .fetch_all(&self.pool)
-                .await?;
+        let symbols: Vec<String> = sqlx::query_scalar!(
+            "SELECT symbol AS \"symbol!\" FROM watchlist WHERE channel_id = $1 ORDER BY symbol",
+            channel_id,
+        )
+        .fetch_all(&self.pool)
+        .await?;
         debug!(count = symbols.len(), "list done");
         Ok(symbols)
     }
@@ -91,10 +94,11 @@ impl SymbolStore {
     /// Distinct channels that have at least one watched symbol.
     #[instrument(name = "symbol_store_channels", skip(self))]
     pub async fn channels(&self) -> Result<Vec<i64>, Error> {
-        let channels: Vec<i64> =
-            sqlx::query_scalar("SELECT DISTINCT channel_id FROM watchlist")
-                .fetch_all(&self.pool)
-                .await?;
+        let channels: Vec<i64> = sqlx::query_scalar!(
+            "SELECT DISTINCT channel_id AS \"channel_id!\" FROM watchlist"
+        )
+        .fetch_all(&self.pool)
+        .await?;
         debug!(count = channels.len(), "channels done");
         Ok(channels)
     }
@@ -110,10 +114,12 @@ impl SymbolStore {
 
         let mut tx = self.pool.begin().await?;
 
-        sqlx::query("DELETE FROM pending_delete WHERE req_id = $1 OR expires_at < now()")
-            .bind(&id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query!(
+            "DELETE FROM pending_delete WHERE req_id = $1 OR expires_at < now()",
+            id,
+        )
+        .execute(&mut *tx)
+        .await?;
 
         if symbols.is_empty() {
             warn!("no symbols provided for pending delete");
@@ -123,13 +129,13 @@ impl SymbolStore {
 
         let mut added = 0i64;
         for symbol in &symbols {
-            let res = sqlx::query(
+            let res = sqlx::query!(
                 "INSERT INTO pending_delete (req_id, symbol, expires_at) \
                  VALUES ($1, $2, now() + INTERVAL '5 minutes') \
                  ON CONFLICT (req_id, symbol) DO NOTHING",
+                id,
+                symbol,
             )
-            .bind(&id)
-            .bind(symbol)
             .execute(&mut *tx)
             .await?;
             added += res.rows_affected() as i64;
@@ -144,10 +150,10 @@ impl SymbolStore {
     /// Get Pending Delete
     #[instrument(name = "symbol_store_get_pending_delete", skip(self), fields(req_id = %id))]
     pub async fn get_pending_delete(&self, id: String) -> Result<Option<Vec<String>>, Error> {
-        let symbols: Vec<String> = sqlx::query_scalar(
-            "SELECT symbol FROM pending_delete WHERE req_id = $1 AND expires_at > now() ORDER BY symbol",
+        let symbols: Vec<String> = sqlx::query_scalar!(
+            "SELECT symbol AS \"symbol!\" FROM pending_delete WHERE req_id = $1 AND expires_at > now() ORDER BY symbol",
+            id,
         )
-        .bind(&id)
         .fetch_all(&self.pool)
         .await?;
 
