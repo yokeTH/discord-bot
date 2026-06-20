@@ -1,6 +1,26 @@
+[package]
+name = "bot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+stock = { workspace = true }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+chrono-tz = { workspace = true }
+dotenvy = "0.15.7"
+poise = "0.6.1"
+serenity = "0.12.5"
+tokio = { workspace = true }
+tokio-cron-scheduler = { version = "*", features = ["signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-futures = { workspace = true }
+
 [workspace]
 resolver = "3"
-members = ["apps/bot", "libs/stock"]
+members = ["stock"]
 
 [workspace.dependencies]
 anyhow = "1"
@@ -14,4 +34,4 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-stock = { path = "libs/stock" }
+stock = { path = "stock" }

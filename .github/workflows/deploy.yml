@@ -67,9 +67,8 @@ jobs:
 
       - name: Prepare Docker context
         run: |
-          cp target/x86_64-unknown-linux-musl/release/bot apps/bot/bot
-          cp /etc/ssl/certs/ca-certificates.crt apps/bot/ca-certificates.crt
-          cp -r fonts apps/bot/fonts
+          cp target/x86_64-unknown-linux-musl/release/bot ./bot
+          cp /etc/ssl/certs/ca-certificates.crt ./ca-certificates.crt
 
       - name: Short SHA
         id: vars
@@ -91,8 +90,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./apps/bot
-          file: ./apps/bot/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ghcr.io/${{ steps.repo.outputs.name }}/bot:${{ github.ref_type == 'tag' && github.ref_name || steps.vars.outputs.short_sha }}
           build-args: |
